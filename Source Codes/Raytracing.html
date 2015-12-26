@@ -1,0 +1,419 @@
+<!-- Fall 2014 - Final Project CSC513 - Vy Bui - Student ID: 2412401  -->
+<!-- Dec 04, 2014 -->
+<html>
+  <head>
+    <meta content="text/html; charset=windows-1252" http-equiv="content-type">
+    <!-- MATH Libraries //-->
+    <script type="text/javascript" src="js/math/gl-matrix-min.js"></script>
+    <!-- WEBGL Libraries //-->
+    <script type="text/javascript" src="js/webgl/Globals.js"></script>
+    <script type="text/javascript" src="js/webgl/Utils.js"></script>
+    <script type="text/javascript" src="js/webgl/Program.js"></script>
+    <script type="text/javascript" src="js/webgl/Scene.js"></script>
+    <script type="text/javascript" src="js/webgl/Axis.js"></script>
+    <script type="text/javascript" src="js/webgl/Camera.js"></script>
+    <script type="text/javascript" src="js/webgl/CameraInteractor.js"></script>
+    <script type="text/javascript" src="js/webgl/SceneTransforms.js"></script>
+    <script type="text/javascript" src="js/webgl/Texture.js"></script>
+    <script type="text/javascript" src="js/webgl/WebGLApp.js"></script>
+    <script type="text/javascript" src="js/webgl/PostProcess.js"></script>
+    <script id="post-common-vs" type="x-shader/x-vertex">
+attribute vec2 aVertexPosition;
+attribute vec2 aVertexTextureCoords;
+
+varying vec2 vTextureCoord;
+
+void main(void) {
+    vTextureCoord = aVertexTextureCoords;
+    gl_Position = vec4(aVertexPosition, 0.0, 1.0);
+}   
+</script>
+    <script id="raytrace-fs" type="x-shader/x-fragment">
+precision mediump float;
+
+uniform float uTime;
+uniform vec2 uInverseTextureSize;
+
+vec3 lightDir = normalize( vec3(0.0, 1.0, 1.0) );
+vec3 eyePos = vec3(-5.0, 0.5, 10.0);
+vec3 bgColor = vec3(0.3, 0.3, 0.3);
+
+vec3 LightDiffuse = vec3(1.0, 1.0, 1.0);
+vec3 LightAmbient = vec3(0.2,0.2,0.2);
+vec3 LightSpecular = vec3(1.0, 1.0, 1.0);
+
+float Shininess = 230.0;
+
+vec4 cylinder = vec4(0.0, 0.0, -0.5, 1.0);
+vec3 cylinderColor = vec3(46.0/256.0,99.0/256.0,191.0/256.0);
+
+vec4 sphere1 = vec4(-4.0, 2.0, 0.0, 1.3);
+vec3 sphere1Ambient = vec3(1.0,1.0,1.0);
+vec3 sphere1Diffuse = vec3(46.0/256.0,99.0/256.0,191.0/256.0);
+vec3 sphere1Specular = vec3(1.0,1.0,1.0);
+
+vec4 plane = vec4(0.0, 0.0, 0.0, 1.0);
+vec3 planeColor = vec3(0.2,0.2,0.2);
+
+vec3 mirrorColor = vec3(0.5,0.5,0.5);
+
+float maxDist = 1024.0;
+
+// Intersect a ray with a sphere
+// ro is the ray origin, rd is the ray direction, and s is the sphere
+float sphereInter( vec3 ro, vec3 rd, vec4 s ) {
+    // Transform the ray into object space
+    // Follow Pershey page 77
+    float a = dot(rd, rd);
+    float b = 2.0 * (dot(ro, rd) - dot(s.xyz, rd));
+    float c = dot(ro, ro) + dot(s.xyz, s.xyz) - 2.0 * dot(ro, s.xyz) - s.w * s.w; // w is the sphere radius
+    float d = b * b - 4.0 * a * c;
+    if(d < 0.0) return d; // No intersection    
+    return (-b - sqrt(d)) / (2.0 * a);
+}
+// Unit normal of a point on the sphere
+vec3 sphereNorm( vec3 pt, vec4 s ) {
+    return ( pt - s.xyz )/ s.w;
+}
+
+float intersectSphere( vec3 ro, vec3 rd, out vec3 norm, out vec3 colorA, out vec3 colorD, out vec3 colorS ) {
+    float dist = maxDist;
+    // Return the normal and color with the closest intersection point (lowest dist)
+    float interDist = sphereInter( ro, rd, sphere1 );     
+    if ( interDist > 0.0 && interDist < dist ) {
+        dist = interDist;
+        vec3 pt = ro + dist * rd; // Point of intersection
+        norm = sphereNorm(pt, sphere1); // Get normal for that point
+        colorA = sphere1Ambient; // Get color for the sphere
+		colorD = sphere1Diffuse;
+		colorS = sphere1Specular;
+    }
+    return dist;
+}
+
+//Intersect a ray with a cylinder
+//ro is the ray origin, rd is the ray direction, and s is the cylinder
+float cylinderInter( vec3 ro, vec3 rd, vec4 s) {
+    float a = rd.x * rd.x + rd.y * rd.y;
+    float b = 2.0 * ro.x * rd.x + 2.0 * ro.y * rd.y;
+    float c = ro.x * ro.x + ro.y * ro.y - s.w * s.w;
+    float d = b * b - 4.0 * a * c;
+    if(d < 0.0) return d; // No intersection    
+    float t1 = (-b + sqrt(d)) / (2.0 * a);
+	float t2 = (-b - sqrt(d)) / (2.0 * a);
+	return t1;
+}
+float cylinderInter1( vec3 ro, vec3 rd, vec4 s) {
+    float a = rd.x * rd.x + rd.y * rd.y;
+    float b = 2.0 * ro.x * rd.x + 2.0 * ro.y * rd.y;
+    float c = ro.x * ro.x + ro.y * ro.y - s.w * s.w;
+    float d = b * b - 4.0 * a * c;
+    if(d < 0.0) return d; // No intersection    
+    float t1 = (-b + sqrt(d)) / (2.0 * a);
+	float t2 = (-b - sqrt(d)) / (2.0 * a);
+	return t2;
+}
+//Intersect a ray with a plane
+//ro is the ray origin, rd is the ray direction
+float planeInter1( vec3 ro, vec3 rd, vec4 s) {
+    float t;
+	return t = (-s.w - ro.z)/rd.z;
+}
+float planeInter2( vec3 ro, vec3 rd, vec4 s) {
+    float t;
+	return t = (s.w - ro.z)/rd.z;
+}
+
+// Unit normal of a point on the cylinder
+vec3 cylinderNorm( vec3 pt, vec4 s ) {
+    return ( pt - s.xyz )/ s.w;
+}
+// Intersect with Cylinder
+// ro is the ray origin, rd is the ray direction
+float intersectCyn( vec3 ro, vec3 rd, out vec3 norm, out vec3 color ) {
+	float dist = maxDist;
+	float t1 = cylinderInter( ro, rd, cylinder);
+	float t2 = cylinderInter1( ro, rd, cylinder);
+	float t3 = planeInter1( ro, rd, cylinder);
+	float t4 = planeInter2( ro, rd, cylinder);
+	vec3 pt1 = ro + t1 * rd;   
+	vec3 pt2 = ro + t2 * rd; 
+	vec3 pt3 = ro + t3 * rd;
+	vec3 pt4 = ro + t4 * rd;
+	// Return the normal and color with the closest intersection point (lowest dist)
+    if ( pt1.z < cylinder.w && pt1.z > -cylinder.w ) {
+        dist = t1;
+        vec3 pt = ro + dist * rd; // Point of intersection
+        norm = cylinderNorm(pt, cylinder); // Get normal for that point
+        color = cylinderColor; // Get color for the sphere
+    }
+	if ( (pt3.x * pt3.x + pt3.y * pt3.y) < cylinder.w * cylinder.w ) {
+        dist = t3;
+        vec3 pt = ro + dist * rd; // Point of intersection
+        norm = cylinderNorm(pt, cylinder); // Get normal for that point
+        color = cylinderColor; // Get color for the sphere
+    }
+	if ( (pt4.x * pt4.x + pt4.y * pt4.y) < cylinder.w * cylinder.w ) {
+        dist = t4;
+        vec3 pt = ro + dist * rd; // Point of intersection
+        norm = cylinderNorm(pt, cylinder); // Get normal for that point
+        color = cylinderColor; // Get color for the sphere
+    }
+    if ( pt2.z < cylinder.w && pt2.z > -cylinder.w) {
+        dist = t2;
+        vec3 pt = ro + dist * rd; // Point of intersection
+        norm = cylinderNorm(pt, cylinder); // Get normal for that point
+        color = cylinderColor; // Get color for the sphere
+    }
+    return dist;
+}
+
+// Intersect with Plane
+// ro is the ray origin, rd is the ray direction
+float planeInter( vec3 ro, vec3 rd, vec4 s, vec3 normalPlane, float offSet ) {
+    float t =  -(dot(ro, normalPlane) + offSet) / dot(rd, normalPlane); 
+    return t;
+}
+
+float intersectPlane( vec3 ro, vec3 rd, out vec3 norm, out vec3 color, out vec3 pt) {
+    float dist = maxDist;
+	vec3 normal = vec3(0.0, 4.0, 1.0);
+	float offSet = 4.0; 
+    float interDist = planeInter( ro, rd, plane, normal, offSet );  
+	pt = ro + interDist * rd;   
+	// Return the normal and color with the closest intersection point (lowest dist)
+    if ( pt.x > -7.0 && pt.x < 7.0 && pt.y > -2.0 && pt.y < 3.0) {
+        dist = interDist;
+        pt = ro + dist * rd; // Point of intersection
+        norm = normal;
+        color = planeColor;
+    }
+    return dist;
+}
+
+float intersectMirror( vec3 ro, vec3 rd, out vec3 norm, out vec3 color, out vec3 pt) {
+    float dist = maxDist;
+	// Return the normal and color with the closest intersection point (lowest dist)
+	vec3 normal = vec3(-3.0, 0.0, 1.0);
+	float offSet = 14.0; 
+    float interDist = planeInter( ro, rd, plane, normal, offSet );  
+	pt = ro + interDist * rd;   
+    if ( pt.x > 0.0 && pt.x < 9.0 && pt.y > 0.0 && pt.y < 6.0 && pt.z > -8.0 && pt.z < 1.0) {
+        dist = interDist;
+        pt = ro + dist * rd; // Point of intersection
+        norm = normal;
+        color = mirrorColor;
+    }
+    return dist;
+}
+
+void main( void ) {
+    // Pixel coordinate of the fragment being rendered
+    vec2 uv = ( gl_FragCoord.xy * uInverseTextureSize );
+    float aspectRatio = uInverseTextureSize.y/uInverseTextureSize.x;
+    
+    // Wiggle the sphere back and forth a bit
+    //sphere1.x = 1.5 * sin(uTime);
+    sphere1.y = 3.0 + 2.1 * sin(uTime * 3.0);
+    
+    // Cast a ray out from the eye position into the scene
+    vec3 ro = eyePos;
+    // Ray we cast is tilted slightly downward to give a better view of the scene
+    vec3 rd = normalize(vec3( -0.5 + uv * vec2(aspectRatio, 1.0), -1.0));
+    
+    vec3 rayColor = bgColor; // Default color if we don't intersect with anything
+
+    // See if the ray intesects with any objects. 
+    // Provides the normal of the nearest intersection point and color
+    vec3 sphereNorm, sphere1Ambient, sphere1Diffuse, sphere1Specular;
+	vec3 cynNorm, cynColor;
+	vec3 planeNorm, planeColor, pointOnPlane;
+	vec3 mirrorNorm, mirrorColor, pointOnMirror;
+    float tSphere = intersectSphere(ro, rd, sphereNorm, sphere1Ambient, sphere1Diffuse, sphere1Specular);  
+	float tCyn = intersectCyn(ro, rd, cynNorm, cynColor);  
+	float tPlane = intersectPlane(ro, rd, planeNorm, planeColor, pointOnPlane); // the floor
+	float tMirror = intersectMirror(ro, rd, mirrorNorm, mirrorColor, pointOnMirror); // the mirror
+
+	// SIMPLE SHADOW
+	float tSphere1 = intersectSphere(pointOnPlane, lightDir, sphereNorm, sphere1Ambient, sphere1Diffuse, sphere1Specular);
+	//float tCyn1 = intersectCyn(pointOnPlane, lightDir, cynNorm, cynColor); 
+	if ( tPlane < maxDist ) {
+        vec3 N = planeNorm;
+		vec3 L = lightDir;
+		float lambertTerm = dot(N,L); //Lambert's cosine law
+		vec3 A = planeColor * LightAmbient; // Ambient Term
+    	vec3 D = LightDiffuse * planeColor * lambertTerm;  //Diffuse Term       	
+		rayColor = D + A;
+		gl_FragColor = vec4(rayColor, 1.0);
+    } 
+	if ( tMirror < maxDist ) {
+        vec3 N = mirrorNorm;
+		vec3 L = lightDir;
+		float lambertTerm = dot(N,L); //Lambert's cosine law
+		vec3 A = mirrorColor * LightAmbient; // Ambient Term
+    	vec3 D = LightDiffuse * mirrorColor * lambertTerm;  //Diffuse Term       	
+		rayColor = D + A;
+		gl_FragColor = vec4(rayColor, 1.0);
+		// REFLECTION
+		vec3 V = lightDir + tMirror * pointOnMirror; 
+		float c1 = - dot(mirrorNorm, V);    
+		vec3 Rl = V + (2.0 * mirrorNorm * c1 );	
+		float tSphere2 = intersectSphere(pointOnMirror, Rl, sphereNorm, sphere1Ambient, sphere1Diffuse, sphere1Specular);
+		if (tSphere2 < maxDist) {
+			vec3 N = sphereNorm;
+			vec3 L = lightDir;
+			float lambertTerm = dot(N,L); //Lambert's cosine law
+			vec3 A = sphere1Ambient * LightAmbient;   	
+    		vec3 D = vec3(0.0,0.0,0.0);  //Diffuse Term       	
+    		vec3 S = vec3(0.0,0.0,0.0); //Specular Term 
+    		if(lambertTerm > 0.0) //only if lambertTerm is positive
+    		{
+        		D = LightDiffuse * sphere1Diffuse * lambertTerm; //add diffuse term        
+        		vec3 E = normalize(-eyePos);
+        		vec3 R = reflect(L, N);
+        		float specular = pow(max(dot(R, E), 0.0), Shininess );        
+        		S = LightSpecular * sphere1Specular * specular; //add specular term
+    		}
+			rayColor = D + A + S;
+			gl_FragColor = vec4(rayColor, 1.0);
+		}	
+		float tCyn2 = intersectCyn(pointOnMirror, Rl, cynNorm, cynColor);
+		if (tCyn2 < maxDist) {
+        	vec3 N = cynNorm;
+			vec3 L = lightDir;
+			//Lambert's cosine law
+			float lambertTerm = dot(N,L);
+			vec3 A = cynColor * LightAmbient;   	
+    		vec3 D = vec3(0.0,0.0,0.0);  //Diffuse Term       	
+    		vec3 S = vec3(0.0,0.0,0.0); //Specular Term 
+    		if(lambertTerm > 0.0) //only if lambertTerm is positive
+    		{
+        		D = LightDiffuse * cynColor * lambertTerm; //add diffuse term        
+        		vec3 E = normalize(-eyePos);
+        		vec3 R = reflect(L, N);
+        		float specular = pow(max(dot(R, E), 0.0), Shininess );          
+        		S = LightSpecular * cynColor * specular; //add specular term
+    		}
+			rayColor = D + A ;
+			//rayColor = D + A + S;
+			gl_FragColor = vec4(rayColor, 1.0);
+		} 
+    } 
+	if (tSphere1 < maxDist) {
+		vec3 N = planeNorm;
+		vec3 L = lightDir;
+		float lambertTerm = dot(N,L); //Lambert's cosine law
+		vec3 A = planeColor * LightAmbient; // Ambient Term
+		rayColor = A;
+		//rayColor = vec3(0.5,0.5,0.5);
+		gl_FragColor = vec4(rayColor, 1.0);
+	}
+    if ( tSphere < maxDist ) {
+		vec3 N = sphereNorm;
+		vec3 L = lightDir;
+		//Lambert's cosine law
+		float lambertTerm = dot(N,L);
+		vec3 A = sphere1Ambient * LightAmbient;   	
+    	vec3 D = vec3(0.0,0.0,0.0);  //Diffuse Term       	
+    	vec3 S = vec3(0.0,0.0,0.0); //Specular Term 
+    	if(lambertTerm > 0.0) //only if lambertTerm is positive
+    	{
+        	D = LightDiffuse * sphere1Diffuse * lambertTerm; //add diffuse term        
+        	vec3 E = normalize(-eyePos);
+        	vec3 R = reflect(L, N);
+        	float specular = pow(max(dot(R, E), 0.0), Shininess );        
+        	S = LightSpecular * sphere1Specular * specular; //add specular term
+    	}
+		rayColor = D + A + S;
+		gl_FragColor = vec4(rayColor, 1.0);
+    } 
+	if ( tCyn < maxDist ) {
+        vec3 N = cynNorm;
+		//vec3 lightDir = normalize( vec3(-1.5, 2.0, 1.0) );
+		vec3 L = lightDir;
+		//Lambert's cosine law
+		float lambertTerm = dot(N,L);
+		vec3 A = cynColor * LightAmbient;   	
+    	vec3 D = vec3(0.0,0.0,0.0);  //Diffuse Term       	
+    	vec3 S = vec3(0.0,0.0,0.0); //Specular Term 
+    	if(lambertTerm > 0.0) //only if lambertTerm is positive
+    	{
+        	D = LightDiffuse * cynColor * lambertTerm; //add diffuse term        
+        	vec3 E = normalize(-eyePos);
+        	vec3 R = reflect(L, N);
+        	float specular = pow(max(dot(R, E), 0.0), Shininess );          
+        	S = LightSpecular * cynColor * specular; //add specular term
+    	}
+		rayColor = D + A ;
+		gl_FragColor = vec4(rayColor, 1.0);
+    } 
+	
+    gl_FragColor = vec4(rayColor, 1.0);
+}
+</script>
+    <script id="code-js" type="text/javascript">
+var camera 		= null;
+var interactor 	= null;
+var post 		= null;
+var transforms	= null;
+
+function configure(){
+    gl.clearColor(0.3,0.3,0.3, 1.0);
+    gl.clearDepth(100.0);
+    gl.enable(gl.DEPTH_TEST);
+    gl.depthFunc(gl.LESS);
+	gl.blendFunc(gl.SRC_ALPHA,gl.ONE_MINUS_SRC_ALPHA);    
+    //Creates and sets up the camera location
+    camera = new Camera(CAMERA_ORBITING_TYPE);
+    camera.goHome([0,0,40]);
+    camera.setFocus([0.0,0.0,0.0]);
+    camera.setElevation(-40);
+    camera.setAzimuth(-30);
+    camera.hookRenderer = render;     
+    var canvas  = document.getElementById('canvas-element-id');    
+    //Post Process
+    post = new PostProcess(canvas, "raytrace-fs");    
+    //Creates and sets up the mouse and keyboard interactor
+    interactor = new CameraInteractor(camera, canvas);        
+    //Scene Transforms
+    transforms = new SceneTransforms(camera);   
+    //init transforms
+    transforms.init();
+}
+
+//Loads the scene
+function load(){
+
+}
+
+function render(){
+    gl.viewport(0, 0, c_width, c_height);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+    // Checks to see if the framebuffer needs to be resized to match the canvas
+    post.validateSize();
+    post.bind();
+
+    //Render the fullscreen quad
+    post.draw();
+}
+
+// Entry point. This function is invoked when the page is loaded
+var app = null;
+function runWebGLApp() {
+    app = new WebGLApp("canvas-element-id");
+    app.configureGLHook = configure;
+    app.loadSceneHook   = load;
+    app.drawSceneHook   = render;
+    app.run();
+}
+</script>
+  </head>
+  <body onload="runWebGLApp()">
+    <div id="canvasContainer">
+      <canvas id="canvas-element-id" width="1600" height="400">
+      </canvas>
+    </div>
+    
+  </body>
+</html>
